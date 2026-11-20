@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediQueue — Real-Time Hospital OPD Triage & Waiting-Room Display</title>
+  <style>
+    :root {
+      --bg: #090d14;
+      --surface: #111824;
+      --border: #1f2d42;
+      --text: #e6edf3;
+      --muted: #8b9bb4;
+      --blue: #38bdf8;
+      --green: #22c55e;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 15px 26px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { margin: 0; font-size: 20px; color: var(--blue); }
+    .btn-primary { background: var(--blue); color: #05131f; border: none; padding: 9px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+    .container { max-width: 1260px; margin: 20px auto; padding: 0 20px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 20px; }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px; }
+    .kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+    .kpi .val { font-size: 26px; font-weight: 800; margin-top: 5px; }
+    .cabins { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .cabin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .cabin-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .token-display { background: #080c12; border: 1px solid #1e2c42; border-radius: 10px; padding: 14px; margin: 12px 0; text-align: center; }
+    .token-big { font-size: 28px; font-weight: 900; color: var(--green); letter-spacing: 1px; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; }
+    .CRITICAL { background: rgba(239,68,68,0.2); color: var(--red); }
+    .URGENT { background: rgba(245,158,11,0.2); color: var(--amber); }
+    .NORMAL { background: rgba(56,189,248,0.18); color: var(--blue); }
+    .READY { background: rgba(34,197,94,0.18); color: var(--green); }
+    .IN_CONSULTATION { background: rgba(245,158,11,0.2); color: var(--amber); }
+    .btn-action { width: 100%; padding: 10px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; }
+    .btn-call { background: var(--green); color: #052e16; }
+    .btn-done { background: var(--amber); color: #1c1002; }
+    .bottom-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+    @media (max-width: 900px) { .bottom-grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .panel h3 { margin: 0 0 12px; font-size: 15px; color: var(--blue); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); align-items: center; justify-content: center; z-index: 50; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px; width: 92%; max-width: 430px; }
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .field input, .field select { width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border); background: #090d14; color: var(--text); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MediQueue · Hospital OPD Triage & Live Token Board</h1>
+    <button class="btn-primary" onclick="openModal('reg-modal')">+ Register Walk-In / Emergency</button>
+  </header>
+
+  <div class="container">
+    <div class="kpis">
+      <div class="kpi"><div class="label">Patients Waiting</div><div class="val" id="k-wait">0</div></div>
+      <div class="kpi"><div class="label">Critical Triage Queue</div><div class="val" style="color:var(--red)" id="k-crit">0</div></div>
+      <div class="kpi"><div class="label">In Doctor Consultation</div><div class="val" style="color:var(--amber)" id="k-cons">0</div></div>
+      <div class="kpi"><div class="label">Completed Today</div><div class="val" style="color:var(--green)" id="k-done">0</div></div>
+    </div>
+
+    <div class="cabins" id="cabins-grid"></div>
+
+    <div class="bottom-grid">
+      <div class="panel">
+        <h3>Live Priority Waiting Queue (Auto-Sorted: CRITICAL → URGENT → NORMAL)</h3>
+        <table>
+          <thead><tr><th>Token</th><th>Patient</th><th>Dept</th><th>Triage</th><th>Symptoms</th></tr></thead>
+          <tbody id="queue-body"></tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h3>Recent Digital Prescriptions</h3>
+        <div id="history-box"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Register Patient Modal -->
+  <div class="modal-bg" id="reg-modal">
+    <div class="modal">
+      <h2 style="margin-top:0">OPD Triage Registration</h2>
+      <div class="field"><label>Patient Name</label><input id="p-name" placeholder="e.g. Meenakshi Sundaram" /></div>
+      <div class="field"><label>Age</label><input id="p-age" type="number" value="42" /></div>
+      <div class="field"><label>Department</label>
+        <select id="p-dept">
+          <option value="General Medicine">General Medicine</option>
+          <option value="Cardiology">Cardiology</option>
+          <option value="Orthopedics">Orthopedics</option>
+        </select>
+      </div>
+      <div class="field"><label>Triage Severity</label>
+        <select id="p-triage">
+          <option value="NORMAL">NORMAL (Routine OPD)</option>
+          <option value="URGENT">URGENT (High Fever / Acute Pain)</option>
+          <option value="CRITICAL">CRITICAL (Emergency Priority Jump)</option>
+        </select>
+      </div>
+      <div class="field"><label>Chief Symptoms</label><input id="p-sym" placeholder="e.g. Shortness of breath" /></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-action" style="background:#1e293b;color:#fff" onclick="closeModals()">Cancel</button>
+        <button class="btn-action btn-call" onclick="submitRegistration()">Generate OPD Token</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Complete Consultation Modal -->
+  <div class="modal-bg" id="rx-modal">
+    <div class="modal">
+      <h2 style="margin-top:0" id="rx-title">Complete Consultation</h2>
+      <div class="field"><label>Diagnosis & Prescription Summary</label><input id="rx-notes" placeholder="e.g. Paracetamol 650mg SOS + Hydration" /></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn-action" style="background:#1e293b;color:#fff" onclick="closeModals()">Cancel</button>
+        <button class="btn-action btn-done" onclick="submitComplete()">Save Rx & Free Cabin</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let activeCabinForRx = null;
+
+    async function loadState() {
+      const res = await fetch('/api/state');
+      const data = await res.json();
+      document.getElementById('k-wait').textContent = data.metrics.waiting;
+      document.getElementById('k-crit').textContent = data.metrics.criticalWaiting;
+      document.getElementById('k-cons').textContent = data.metrics.inConsultation;
+      document.getElementById('k-done').textContent = data.metrics.completed;
+
+      const cabinsEl = document.getElementById('cabins-grid');
+      cabinsEl.innerHTML = data.cabins.map(c => {
+        const isBusy = c.status === 'IN_CONSULTATION';
+        const center = isBusy
+          ? `<div class="token-display"><div class="token-big">${c.currentToken}</div><div style="margin-top:4px"><strong>${c.patientName}</strong> (${c.age}y) <span class="badge ${c.triageLevel}">${c.triageLevel}</span></div><div style="font-size:12px;color:var(--muted);margin-top:3px">${c.symptoms}</div></div>`
+          : `<div class="token-display"><div class="token-big" style="color:var(--muted)">IDLE</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Ready for next ${c.department} token</div></div>`;
+        const btn = isBusy
+          ? `<button class="btn-action btn-done" onclick="openComplete('${c.cabinCode}', '${c.currentToken}')">Complete & Issue Rx</button>`
+          : `<button class="btn-action btn-call" onclick="callNext('${c.cabinCode}')">Call Next Priority Patient</button>`;
+        return `<div class="cabin-card">
+          <div class="cabin-top"><strong>${c.cabinCode} · ${c.doctorName}</strong><span class="badge ${c.status}">${c.status}</span></div>
+          <div style="font-size:13px;color:var(--blue)">${c.department}</div>
+          ${center}
+          ${btn}
+        </div>`;
+      }).join('');
+
+      const qBody = document.getElementById('queue-body');
+      qBody.innerHTML = data.waitingQueue.length
+        ? data.waitingQueue.map(w => `<tr><td><strong>${w.tokenNumber}</strong></td><td>${w.patientName} (${w.age}y)</td><td>${w.department}</td><td><span class="badge ${w.triageLevel}">${w.triageLevel}</span></td><td>${w.symptoms}</td></tr>`).join('')
+        : '<tr><td colspan="5" style="color:var(--muted)">No patients waiting in queue.</td></tr>';
+
+      const histEl = document.getElementById('history-box');
+      histEl.innerHTML = data.completedHistory.length
+        ? data.completedHistory.map(h => `<div style="border-bottom:1px solid var(--border);padding:8px 0;font-size:13px"><strong>${h.tokenNumber} · ${h.patientName}</strong> (${h.department})<div style="color:var(--muted);font-size:12px;margin-top:2px">Rx: ${h.notes}</div></div>`).join('')
+        : '<div style="color:var(--muted);font-size:13px">No completed consultations yet.</div>';
+    }
+
+    function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+    function closeModals() { document.querySelectorAll('.modal-bg').forEach(m => m.style.display = 'none'); }
+
+    async function submitRegistration() {
+      const payload = {
+        patientName: document.getElementById('p-name').value || 'Walk-in Patient',
+        age: document.getElementById('p-age').value || '30',
+        department: document.getElementById('p-dept').value,
+        triageLevel: document.getElementById('p-triage').value,
+        symptoms: document.getElementById('p-sym').value || 'General OPD'
+      };
+      await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      closeModals();
+      loadState();
+    }
+
+    async function callNext(cabinCode) {
+      const res = await fetch('/api/call-next', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cabinCode }) });
+      const data = await res.json();
+      if (!data.ok) alert(data.error);
+      loadState();
+    }
+
+    function openComplete(cabinCode, token) {
+      activeCabinForRx = cabinCode;
+      document.getElementById('rx-title').textContent = `Complete Consultation · ${token} (${cabinCode})`;
+      openModal('rx-modal');
+    }
+
+    async function submitComplete() {
+      const notes = document.getElementById('rx-notes').value;
+      await fetch('/api/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cabinCode: activeCabinForRx, notes }) });
+      closeModals();
+      loadState();
+    }
+
+    loadState();
+    setInterval(loadState, 3000);
+  </script>
+</body>
+</html>
